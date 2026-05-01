@@ -181,6 +181,7 @@ button:disabled {
 
 .player-copy {
   min-width: 0;
+  flex: 1;
 }
 
 h2 {
@@ -277,6 +278,7 @@ h2 {
 
 .favorite-toggle {
   flex: 0 0 auto;
+  margin-left: auto;
   width: 34px;
   min-height: 34px;
   border: 1px solid var(--line);
