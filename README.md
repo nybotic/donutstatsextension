@@ -22,6 +22,10 @@ A lightweight Chrome/Edge extension for looking up public DonutSMP player stats 
 C:\Users\aaron\Documents\projects\Extensions\DonutStatsExtension
 ```
 
+## Install From Chrome Web Store
+
+Install it from the [DonutStats Player Search Chrome Web Store listing](https://chromewebstore.google.com/detail/donutstats-player-search/pegegjodbkdkdgaolbjjmkhlnkjkgdoa).
+
 ## Usage
 
 1. Click the extension icon.
