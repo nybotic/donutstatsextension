@@ -119,13 +119,13 @@ async function searchPlayer(username) {
 
 function parsePlayerPage(html, fallbackName) {
   const doc = new DOMParser().parseFromString(html, "text/html");
-  const titleName = doc.querySelector("h1 span")?.textContent?.trim();
-  const headingName = doc.querySelector("h1")?.textContent?.trim();
-  const name = titleName || headingName || fallbackName;
+  const name = findPlayerName(doc, fallbackName);
+  const isOnline = [...doc.querySelectorAll("span")]
+    .some((node) => /^ONLINE:/i.test(node.textContent.trim()));
 
   const metaPieces = [...doc.querySelectorAll("a, span")]
     .map((node) => node.textContent.trim())
-    .filter((text) => /vouches|profile views/i.test(text));
+    .filter((text) => /vouches|profile views/i.test(text) && !/^ONLINE:/i.test(text));
 
   const statCards = [...doc.querySelectorAll("div")]
     .map((card) => {
@@ -153,6 +153,7 @@ function parsePlayerPage(html, fallbackName) {
 
   return {
     name,
+    isOnline,
     meta: [...new Set(metaPieces)].slice(0, 2).join(" • "),
     stats: dedupedStats.slice(0, 10)
   };
@@ -161,6 +162,9 @@ function parsePlayerPage(html, fallbackName) {
 function renderPlayer(player) {
   result.hidden = false;
   playerName.textContent = player.name;
+  playerName.classList.toggle("is-online", player.isOnline);
+  playerName.title = player.isOnline ? "Online" : "";
+  playerName.setAttribute("aria-label", player.isOnline ? `${player.name} online` : player.name);
   profileMeta.textContent = player.meta || "DonutSMP player profile";
   avatar.src = `https://mc-heads.net/avatar/${encodeURIComponent(player.name)}/112`;
   avatar.alt = `${player.name} avatar`;
@@ -196,7 +200,7 @@ async function renderRecent() {
   const { recent } = await getStoredPlayers();
   recentWrap.hidden = recent.length === 0;
   recentList.replaceChildren(
-    ...recent.map((name) => createAccountChip(name, "account-chip"))
+    ...recent.map((name) => createRecentChip(name))
   );
 }
 
@@ -212,10 +216,34 @@ function createAccountChip(name, className) {
   return chip;
 }
 
+function createRecentChip(name) {
+  const wrap = document.createElement("span");
+  wrap.className = "recent-chip";
+
+  const searchButton = createAccountChip(name, "account-chip recent-search-chip");
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.className = "recent-remove";
+  removeButton.title = "Remove";
+  removeButton.setAttribute("aria-label", `Remove ${name}`);
+  removeButton.textContent = "×";
+  removeButton.addEventListener("click", () => removeRecentPlayer(name));
+
+  wrap.append(searchButton, removeButton);
+  return wrap;
+}
+
 async function rememberPlayer(username) {
   const { recent } = await getStoredPlayers();
   const next = [username, ...recent.filter((name) => name.toLowerCase() !== username.toLowerCase())].slice(0, 8);
   await chrome.storage.local.set({ [RECENT_KEY]: next });
+}
+
+async function removeRecentPlayer(username) {
+  const { recent } = await getStoredPlayers();
+  const next = recent.filter((name) => name.toLowerCase() !== username.toLowerCase());
+  await chrome.storage.local.set({ [RECENT_KEY]: next });
+  await renderRecent();
 }
 
 async function toggleFavorite(username) {
@@ -296,6 +324,9 @@ function hideResult() {
   result.hidden = true;
   activePlayer = "";
   favoriteToggle.classList.remove("is-favorite");
+  playerName.classList.remove("is-online");
+  playerName.title = "";
+  playerName.removeAttribute("aria-label");
   statsGrid.replaceChildren();
 }
 
@@ -306,4 +337,31 @@ function sanitizeUsername(value) {
 
 function playerUrl(username) {
   return `https://donutstats.org/player.php?user=${encodeURIComponent(username)}`;
+}
+
+function findPlayerName(doc, fallbackName) {
+  const candidates = [
+    doc.title.split("|")[0],
+    doc.querySelector("link[rel='canonical']")?.href?.split("user=")[1],
+    doc.querySelector("iframe[src*='McView3D'][src*='skin=']")?.src?.match(/[?&]skin=([^&]+)/)?.[1],
+    ...[...doc.querySelectorAll("h1 span")].map((node) => node.textContent)
+  ];
+
+  for (const candidate of candidates) {
+    const decoded = decodePlayerName(candidate);
+    if (decoded) {
+      return decoded;
+    }
+  }
+
+  return fallbackName;
+}
+
+function decodePlayerName(value = "") {
+  try {
+    const name = decodeURIComponent(value).trim();
+    return USERNAME_RE.test(name) ? name : "";
+  } catch {
+    return "";
+  }
 }

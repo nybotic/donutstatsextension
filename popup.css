@@ -8,6 +8,7 @@
   --text: #ffffff;
   --accent: #3b82f6;
   --accent-hover: #60a5fa;
+  --online: #22c55e;
   --gold: #eab308;
   --danger: #f87171;
 }
@@ -185,9 +186,22 @@ button:disabled {
 }
 
 h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
   overflow-wrap: anywhere;
   font-size: 19px;
   line-height: 1.15;
+}
+
+h2.is-online::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--online);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.16);
 }
 
 #profile-meta {
@@ -269,6 +283,39 @@ h2 {
   color: var(--text);
   padding: 5px 8px;
   font-size: 11px;
+}
+
+.recent-chip {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.recent-search-chip {
+  border: 0;
+  border-radius: 0;
+  padding-right: 6px;
+}
+
+.recent-remove {
+  width: 22px;
+  min-height: 28px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.recent-remove:hover {
+  background: transparent;
+  color: var(--danger);
 }
 
 .favorite-chip {
