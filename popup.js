@@ -16,6 +16,10 @@ const clearRecent = document.querySelector("#clear-recent");
 
 const RECENT_KEY = "recentPlayers";
 const FAVORITE_KEY = "favoritePlayers";
+const STORAGE_KEYS = [RECENT_KEY, FAVORITE_KEY];
+const FETCH_TIMEOUT_MS = 7500;
+const PAGE_CACHE_TTL_MS = 2 * 60 * 1000;
+const USERNAME_RE = /^[A-Za-z0-9_]{3,16}$/;
 const STAT_ORDER = [
   "Money",
   "Shards",
@@ -28,8 +32,11 @@ const STAT_ORDER = [
   "Earned /sell",
   "Spent /shop"
 ];
+const STAT_ORDER_MAP = new Map(STAT_ORDER.map((label, index) => [label.toLowerCase(), index]));
 
 let activePlayer = "";
+let activeSearchId = 0;
+const pageCache = new Map();
 
 document.addEventListener("DOMContentLoaded", async () => {
   input.focus();
@@ -79,21 +86,17 @@ favoriteToggle.addEventListener("click", async () => {
 });
 
 async function searchPlayer(username) {
+  const searchId = ++activeSearchId;
   setLoading(true);
   hideResult();
   showStatus(`Searching ${username}...`);
 
   try {
-    const response = await fetch(playerUrl(username), {
-      credentials: "omit",
-      cache: "no-store"
-    });
-
-    if (!response.ok) {
-      throw new Error(`DonutStats returned ${response.status}.`);
+    const html = await fetchPlayerPage(username);
+    if (searchId !== activeSearchId) {
+      return;
     }
 
-    const html = await response.text();
     const player = parsePlayerPage(html, username);
 
     if (!player.stats.length) {
@@ -143,9 +146,9 @@ function parsePlayerPage(html, fallbackName) {
   }
 
   dedupedStats.sort((a, b) => {
-    const aIndex = STAT_ORDER.indexOf(a.label);
-    const bIndex = STAT_ORDER.indexOf(b.label);
-    return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex);
+    const aIndex = STAT_ORDER_MAP.get(a.label.toLowerCase()) ?? 999;
+    const bIndex = STAT_ORDER_MAP.get(b.label.toLowerCase()) ?? 999;
+    return aIndex - bIndex;
   });
 
   return {
@@ -182,7 +185,7 @@ function renderPlayer(player) {
 }
 
 async function renderFavorites() {
-  const favorites = await getFavorites();
+  const { favorites } = await getStoredPlayers();
   favoriteWrap.hidden = favorites.length === 0;
   favoriteList.replaceChildren(
     ...favorites.map((name) => createAccountChip(name, "account-chip favorite-chip"))
@@ -190,7 +193,7 @@ async function renderFavorites() {
 }
 
 async function renderRecent() {
-  const recent = await getRecent();
+  const { recent } = await getStoredPlayers();
   recentWrap.hidden = recent.length === 0;
   recentList.replaceChildren(
     ...recent.map((name) => createAccountChip(name, "account-chip"))
@@ -210,13 +213,13 @@ function createAccountChip(name, className) {
 }
 
 async function rememberPlayer(username) {
-  const recent = await getRecent();
+  const { recent } = await getStoredPlayers();
   const next = [username, ...recent.filter((name) => name.toLowerCase() !== username.toLowerCase())].slice(0, 8);
   await chrome.storage.local.set({ [RECENT_KEY]: next });
 }
 
 async function toggleFavorite(username) {
-  const favorites = await getFavorites();
+  const { favorites } = await getStoredPlayers();
   const isSaved = favorites.some((name) => name.toLowerCase() === username.toLowerCase());
   const next = isSaved
     ? favorites.filter((name) => name.toLowerCase() !== username.toLowerCase())
@@ -226,21 +229,50 @@ async function toggleFavorite(username) {
 }
 
 async function updateFavoriteToggle() {
-  const favorites = await getFavorites();
+  const { favorites } = await getStoredPlayers();
   const isSaved = activePlayer && favorites.some((name) => name.toLowerCase() === activePlayer.toLowerCase());
   favoriteToggle.classList.toggle("is-favorite", Boolean(isSaved));
   favoriteToggle.title = isSaved ? "Remove favorite" : "Add favorite";
   favoriteToggle.setAttribute("aria-label", isSaved ? "Remove favorite" : "Add favorite");
 }
 
-async function getRecent() {
-  const data = await chrome.storage.local.get(RECENT_KEY);
-  return Array.isArray(data[RECENT_KEY]) ? data[RECENT_KEY] : [];
+async function fetchPlayerPage(username) {
+  const cacheKey = username.toLowerCase();
+  const cached = pageCache.get(cacheKey);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.html;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  const response = await fetch(playerUrl(username), {
+    credentials: "omit",
+    cache: "no-store",
+    signal: controller.signal
+  }).finally(() => clearTimeout(timeout));
+
+  if (!response.ok) {
+    throw new Error(`DonutStats returned ${response.status}.`);
+  }
+
+  const html = await response.text();
+  pageCache.set(cacheKey, {
+    html,
+    expiresAt: Date.now() + PAGE_CACHE_TTL_MS
+  });
+
+  return html;
 }
 
-async function getFavorites() {
-  const data = await chrome.storage.local.get(FAVORITE_KEY);
-  return Array.isArray(data[FAVORITE_KEY]) ? data[FAVORITE_KEY] : [];
+async function getStoredPlayers() {
+  const data = await chrome.storage.local.get(STORAGE_KEYS);
+
+  return {
+    recent: Array.isArray(data[RECENT_KEY]) ? data[RECENT_KEY] : [],
+    favorites: Array.isArray(data[FAVORITE_KEY]) ? data[FAVORITE_KEY] : []
+  };
 }
 
 function setLoading(isLoading) {
@@ -268,7 +300,8 @@ function hideResult() {
 }
 
 function sanitizeUsername(value) {
-  return value.trim().replace(/\s+/g, "");
+  const username = value.trim().replace(/\s+/g, "");
+  return USERNAME_RE.test(username) ? username : "";
 }
 
 function playerUrl(username) {
